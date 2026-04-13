@@ -80,12 +80,17 @@ class SkillLoader:
         return [self.load(name) for name in self.list_skills()]
 
     def _extract_field(self, path: Path, field: str) -> Optional[str]:
-        """Extract a field value from a SKILL.md frontmatter-like format."""
+        """Extract a field value from a SKILL.md frontmatter-like format.
+        Handles markdown bold/italic: **Description**: value
+        """
         if not path.exists():
             return None
+        import re
         for line in path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
-            if line.lower().startswith(f"{field.lower()}:"):
-                _, _, value = line.partition(":")
-                return value.strip()
+            # Strip ALL markdown formatting from the entire line
+            clean = re.sub(r"\*+", "", line).strip()
+            if clean.lower().startswith(f"{field.lower()}:"):
+                _, _, value = clean.partition(":")
+                return value.strip() or None
         return None

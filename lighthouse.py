@@ -67,13 +67,15 @@ class LighthouseKeeper:
             model: Model identifier (or set QUILL_MODEL env)
             github_pat: GitHub PAT for fleet operations (or set GITHUB_PAT env)
         """
-        self.api_key = api_key or os.environ.get("QUILL_API_KEY") or self._load_env("QUILL_API_KEY")
-        self.base_url = (base_url or os.environ.get("QUILL_BASE_URL")
-                         or self._load_env("QUILL_BASE_URL")).rstrip("/")
-        self.model = model or os.environ.get("QUILL_MODEL") or self._load_env("QUILL_MODEL")
+        self.api_key = api_key or os.environ.get("QUILL_API_KEY") or self._load_env("QUILL_API_KEY") or ""
+        raw_url = base_url or os.environ.get("QUILL_BASE_URL") or self._load_env("QUILL_BASE_URL") or ""
+        self.base_url = raw_url.rstrip("/")
+        self.model = model or os.environ.get("QUILL_MODEL") or self._load_env("QUILL_MODEL") or ""
         self.github_pat = (github_pat or os.environ.get("GITHUB_PAT")
-                           or self._load_env("GITHUB_PAT"))
-        self.github_org = os.environ.get("GITHUB_ORG") or self._load_env("GITHUB_ORG") or "SuperInstance"
+                           or self._load_env("GITHUB_PAT")) or ""
+        self.github_org = (os.environ.get("GITHUB_ORG")
+                            or self._load_env("GITHUB_ORG")
+                            or "SuperInstance")
 
         self.boot_time = datetime.now(timezone.utc)
         self.request_count = 0
