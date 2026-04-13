@@ -1,0 +1,42 @@
+# Quill — Capability Declaration
+# This file describes what Quill can do, used by fleet routing systems.
+
+[agent]
+name = "quill"
+version = "19.0"
+role = "architect"
+
+[capabilities]
+isa_design = { level = "expert", description = "Design formal instruction set architectures with byte-level encoding, operational semantics, and cross-runtime conformance vectors" }
+code_audit = { level = "expert", description = "Perform severity-ranked code reviews across Python, C, Rust, TypeScript, Go, Java with evidence-based findings" }
+cross_repo_analysis = { level = "expert", description = "Scan multi-repo ecosystems for dependencies, circular deps, orphans, and health metrics using GitHub API" }
+conformance_testing = { level = "expert", description = "Author ISA conformance test vectors (bytecode + expected state) for multi-runtime verification" }
+spec_authoring = { level = "expert", description = "Write formal specifications including opcode tables, bit-field diagrams, migration guides, and ADRs" }
+fleet_protocol = { level = "advanced", description = "Implement bottle communication, CAPABILITY.toml parsing, vessel structure, and fleet coordination" }
+technical_writing = { level = "expert", description = "Produce audit reports, census reports, dependency maps, session recons, and architecture documents" }
+git_archaeology = { level = "advanced", description = "Analyze commit histories, score witness marks, generate narratives, and trace architectural decisions" }
+
+[languages]
+python = "expert"
+c = "expert"
+rust = "advanced"
+typescript = "advanced"
+go = "intermediate"
+java = "intermediate"
+cuda = "basic"
+
+[tools]
+github_api = true
+git_cli = true
+mermaid = true
+pytest = true
+ruff = true
+mypy = true
+cargo = true
+npm = true
+
+[routing]
+# Tasks that should be routed to Quill
+tags = ["isa", "spec", "audit", "conformance", "dependency", "census", "architecture", "review", "security-review"]
+priority_tags = ["isa-design", "code-audit", "conformance", "cross-repo"]
+anti_tags = ["frontend", "ui", "css", "deploy", "ops"]

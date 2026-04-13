@@ -1,0 +1,8 @@
+.env
+.env.example
+__pycache__/
+*.pyc
+.task-log.jsonl
+.DS_Store
+*.swp
+.quill-cache/
