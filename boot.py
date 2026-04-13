@@ -1,188 +1,275 @@
 #!/usr/bin/env python3
 """
 Quill — ISA Spec Architect & Code Archaeologist
-Boot Script with Lighthouse Keeper Integration
+Boot Script v2.0 — Full Lifecycle Manager
 
-Usage:
-    python3 boot.py                              # Interactive session
-    python3 boot.py --task "Audit flux-runtime"  # Directed task
-    python3 boot.py --checkin                    # Check in with Oracle1
-    python3 boot.py --version                    # Show version
+The one command that makes this repo work:
+    python3 boot.py --assess          # Score readiness
+    python3 boot.py --task "..."      # Work on a task
+    python3 boot.py --checkin         # Check in with Oracle1
+    python3 boot.py --keep            # Run as lighthouse keeper
 
-The lighthouse keeper provides Quill's runtime API key/URL,
-allowing Oracle1 to boot Quill with whichever model fits the task.
+Zero dependencies. Python 3.10+. Clone and run.
+
+Lighthouse keeper integration: Oracle1 provides the API key/URL
+for whichever model fits the task. Quill routes automatically.
 """
 
-import os
 import sys
+import os
 import json
 import argparse
 from pathlib import Path
 from datetime import datetime, timezone
 
-# ── Version ───────────────────────────────────────────────────────
-VERSION = "19.0"
-AGENT_NAME = "Quill"
-AGENT_DESIGNATION = "ISA Spec Architect & Code Archaeologist"
-
-# ── Configuration ─────────────────────────────────────────────────
+# Add src to path
 REPO_ROOT = Path(__file__).parent.resolve()
-ENV_FILE = REPO_ROOT / ".env"
-CONFIG_FILE = REPO_ROOT / "agent.cfg"
-PROMPT_FILE = REPO_ROOT / "PROMPT.md"
-CAPABILITY_FILE = REPO_ROOT / "CAPABILITY.toml"
+sys.path.insert(0, str(REPO_ROOT / "src"))
+
+from config import load, validate, is_ready, REPO_ROOT
+from memory import KeeperMemory
+from llm import detect_provider, route_model, chat_with_fallback
 
 
-def load_env() -> dict:
-    """Load environment variables from .env file."""
-    env = {}
-    if ENV_FILE.exists():
-        for line in ENV_FILE.read_text().strip().split("\n"):
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, value = line.partition("=")
-                env[key.strip()] = value.strip()
-    # Override with actual environment variables
-    for key in ["QUILL_API_KEY", "QUILL_BASE_URL", "QUILL_MODEL", "GITHUB_PAT", "GITHUB_ORG"]:
-        if os.environ.get(key):
-            env[key] = os.environ[key]
-    return env
-
-
-def load_config() -> dict:
-    """Load agent configuration from agent.cfg (simple TOML parser)."""
-    config = {}
-    if not CONFIG_FILE.exists():
-        return config
-    current_section = "global"
-    for line in CONFIG_FILE.read_text().strip().split("\n"):
-        line = line.strip()
-        if line.startswith("[") and line.endswith("]"):
-            current_section = line[1:-1]
-            config[current_section] = config.get(current_section, {})
-        elif "=" in line and not line.startswith("#"):
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            # Handle boolean
-            if value.lower() == "true":
-                value = True
-            elif value.lower() == "false":
-                value = False
-            elif value.isdigit():
-                value = int(value)
-            if current_section not in config:
-                config[current_section] = {}
-            config[current_section][key] = value
-    return config
-
-
-def validate_environment(env: dict) -> list:
-    """Check that required environment variables are set."""
-    issues = []
-    if not env.get("QUILL_API_KEY"):
-        issues.append("QUILL_API_KEY is not set — Quill needs an API key to function")
-    if not env.get("QUILL_BASE_URL"):
-        issues.append("QUILL_BASE_URL is not set — Quill needs to know which model API to use")
-    if not env.get("QUILL_MODEL"):
-        issues.append("QUILL_MODEL is not set — Quill needs to know which model to use")
-    if not env.get("GITHUB_PAT"):
-        issues.append("GITHUB_PAT is not set — Quill needs GitHub access for fleet operations")
-    return issues
-
-
-def load_system_prompt() -> str:
-    """Load the full system prompt from PROMPT.md."""
-    if PROMPT_FILE.exists():
-        return PROMPT_FILE.read_text()
-    return "# Quill System Prompt\n\n[Error: PROMPT.md not found]\n"
-
-
-def load_knowledge_context() -> str:
-    """Load key knowledge files as context."""
-    knowledge_dir = REPO_ROOT / "KNOWLEDGE"
-    context_parts = []
-    if knowledge_dir.exists():
-        for f in sorted(knowledge_dir.glob("*.md")):
-            # Read first 500 lines of each knowledge file as context
-            lines = f.read_text().strip().split("\n")[:500]
-            context_parts.append(f"## {f.name}\n" + "\n".join(lines))
-    return "\n\n---\n\n".join(context_parts) if context_parts else ""
-
-
-def load_capability_toml() -> str:
-    """Load CAPABILITY.toml as context."""
-    if CAPABILITY_FILE.exists():
-        return CAPABILITY_FILE.read_text()
-    return ""
-
-
-def build_boot_context(env: dict, task: str = None) -> str:
-    """Build the full boot context: system prompt + knowledge + task."""
-    system_prompt = load_system_prompt()
-    knowledge = load_knowledge_context()
-    capabilities = load_capability_toml()
-
-    context = f"""# Quill Boot Context — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
-
-## Runtime Configuration
-- Model: {env.get('QUILL_MODEL', 'NOT CONFIGURED')}
-- API Base: {env.get('QUILL_BASE_URL', 'NOT CONFIGURED')}
-- GitHub Org: {env.get('GITHUB_ORG', 'NOT CONFIGURED')}
-- Fleet: SuperInstance
-
-## Agent Identity
-- Name: {AGENT_NAME}
-- Version: {VERSION}
-- Role: {AGENT_DESIGNATION}
-
----
-
-{system_prompt}
-
----
-
-## Fleet Knowledge Context
-
-{knowledge}
-
----
-
-## Capability Declaration
-
-{capabilities}
-"""
-    if task:
-        context += f"""
-
----
-
-## Current Task (from Oracle1)
-
-{task}
-"""
-    return context
+VERSION = "2.0.0"
+AGENT_NAME = "Quill"
+DESIGNATION = "ISA Spec Architect & Code Archaeologist"
 
 
 def print_banner():
-    """Print Quill's boot banner."""
     print(f"""
-╔══════════════════════════════════════════════════════════╗
-║  Quill — ISA Spec Architect & Code Archaeologist        ║
-║  Version {VERSION}                                          ║
-║  Fleet: SuperInstance | Level: Architect                 ║
-╚══════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════╗
+║  {AGENT_NAME} — {DESIGNATION:<44s}║
+║  Version {VERSION:<55s}║
+║  Fleet: SuperInstance | Level: Architect                    ║
+║  Zero dependencies | Model-agnostic | Modular               ║
+╚══════════════════════════════════════════════════════════════╝
 """)
 
 
-def interactive_session(env: dict, config: dict):
+def load_system_prompt() -> str:
+    """Load PROMPT.md."""
+    prompt_file = REPO_ROOT / "PROMPT.md"
+    if prompt_file.exists():
+        return prompt_file.read_text(encoding="utf-8")
+    return ""
+
+
+def load_knowledge_context() -> str:
+    """Load all knowledge files as context."""
+    knowledge_dir = REPO_ROOT / "KNOWLEDGE" / "public"
+    parts = []
+    if knowledge_dir.exists():
+        for f in sorted(knowledge_dir.glob("*.md")):
+            lines = f.read_text(encoding="utf-8").strip().split("\n")[:300]
+            parts.append(f"## {f.name}\n" + "\n".join(lines))
+    return "\n\n---\n\n".join(parts)
+
+
+def load_capability_toml() -> str:
+    """Load CAPABILITY.toml."""
+    cap = REPO_ROOT / "CAPABILITY.toml"
+    if cap.exists():
+        return cap.read_text(encoding="utf-8")
+    return ""
+
+
+def build_context(config: dict, task: str = None) -> str:
+    """Build the full boot context for the model."""
+    system_prompt = load_system_prompt()
+    knowledge = load_knowledge_context()
+    capabilities = load_capability_toml()
+    memory = KeeperMemory(str(REPO_ROOT / ".quill-memory"))
+    recent = memory.recent_context()
+
+    parts = [
+        f"# Quill Boot Context — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"\n## Runtime",
+        f"- Model: {config['model']}",
+        f"- Provider: {detect_provider(config['base_url'])}",
+        f"- API: {config['base_url']}",
+        f"- Version: {VERSION}",
+        "",
+    ]
+
+    if recent:
+        parts.append("## Recent Memory")
+        parts.append(recent)
+        parts.append("")
+
+    parts.append(system_prompt)
+
+    if knowledge:
+        parts.append("\n---\n\n## Fleet Knowledge\n")
+        parts.append(knowledge)
+
+    if capabilities:
+        parts.append("\n---\n\n## Capability Declaration\n")
+        parts.append(capabilities)
+
+    if task:
+        parts.append(f"\n---\n\n## Current Task\n\n{task}")
+
+    return "\n".join(parts)
+
+
+def assess(config: dict) -> int:
+    """
+    Assess bootcamp readiness. Returns score 0-100.
+    Checks environment, vessel files, knowledge, skills, and tools.
+    """
+    print("╔══════════════════════════════════════════╗")
+    print("║  Quill Bootcamp Assessment               ║")
+    print("╚══════════════════════════════════════════╝\n")
+
+    score = 0
+    max_score = 0
+    checks = []
+
+    # 1. Environment (30 pts)
+    print("─── Environment (30 pts) ───")
+    env_issues = validate(config)
+    env_max = 30
+    if not env_issues:
+        env_score = env_max
+        print(f"  ✅ All environment variables configured ({env_max}/{env_max})")
+    else:
+        env_score = max(0, env_max - len([i for i in env_issues if i["level"] == "error"]) * 10)
+        for issue in env_issues:
+            icon = "🔴" if issue["level"] == "error" else "⚠️"
+            print(f"  {icon} {issue['message']}")
+            print(f"     Fix: {issue['fix']}")
+        print(f"  Score: {env_score}/{env_max}")
+    checks.append(("Environment", env_score, env_max))
+    score += env_score
+    max_score += env_max
+
+    # 2. Vessel Files (25 pts)
+    print("\n─── Vessel Files (25 pts) ───")
+    required_files = [
+        ("IDENTITY.md", "Who Quill is"),
+        ("CHARTER.md", "Mission and principles"),
+        ("PROMPT.md", "System prompt"),
+        ("CAPABILITY.toml", "Capability declaration"),
+        ("vessel.json", "Deployment descriptor"),
+        ("TASKBOARD.md", "Current task board"),
+    ]
+    vessel_score = 0
+    vessel_max = 25
+    for filename, desc in required_files:
+        path = REPO_ROOT / filename
+        if path.exists():
+            size = path.stat().st_size
+            vessel_score += 4
+            print(f"  ✅ {filename} ({size:,} bytes) — {desc}")
+        else:
+            print(f"  ❌ {filename} — MISSING ({desc})")
+    print(f"  Score: {min(vessel_score, vessel_max)}/{vessel_max}")
+    checks.append(("Vessel Files", min(vessel_score, vessel_max), vessel_max))
+    score += min(vessel_score, vessel_max)
+    max_score += vessel_max
+
+    # 3. Knowledge (15 pts)
+    print("\n─── Knowledge (15 pts) ───")
+    knowledge_dir = REPO_ROOT / "KNOWLEDGE" / "public"
+    knowledge_max = 15
+    knowledge_score = 0
+    if knowledge_dir.exists():
+        files = list(knowledge_dir.glob("*.md"))
+        knowledge_score = min(len(files) * 3, knowledge_max)
+        for f in files:
+            print(f"  📄 {f.name} ({f.stat().st_size:,} bytes)")
+        print(f"  Score: {knowledge_score}/{knowledge_max}")
+    else:
+        print(f"  ❌ KNOWLEDGE/public/ directory missing")
+        print(f"  Score: 0/{knowledge_max}")
+    checks.append(("Knowledge", knowledge_score, knowledge_max))
+    score += knowledge_score
+    max_score += knowledge_max
+
+    # 4. Skills (15 pts)
+    print("\n─── Skills (15 pts) ───")
+    skills_dir = REPO_ROOT / "SKILLS"
+    skills_max = 15
+    skills_score = 0
+    if skills_dir.exists():
+        from src.skills import SkillLoader
+        loader = SkillLoader(str(skills_dir))
+        skills = loader.load_all()
+        skills_score = min(len(skills) * 5, skills_max)
+        for skill in skills:
+            print(f"  🛠️  {skill.name}: {skill.description or 'No description'}")
+        print(f"  Score: {skills_score}/{skills_max}")
+    else:
+        print(f"  ❌ SKILLS/ directory missing")
+        print(f"  Score: 0/{skills_max}")
+    checks.append(("Skills", skills_score, skills_max))
+    score += skills_score
+    max_score += skills_max
+
+    # 5. Tests (15 pts)
+    print("\n─── Tests (15 pts) ───")
+    tests_dir = REPO_ROOT / "tests"
+    tests_max = 15
+    tests_score = 0
+    if tests_dir.exists():
+        test_files = list(tests_dir.glob("test_*.py"))
+        tests_score = min(len(test_files) * 3, tests_max)
+        for f in test_files:
+            print(f"  🧪 {f.name}")
+        # Try to run tests
+        print(f"\n  Running tests...")
+        import subprocess
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "unittest", "discover", "-s", str(tests_dir), "-v"],
+                capture_output=True, text=True, timeout=30, cwd=str(REPO_ROOT),
+            )
+            if result.returncode == 0:
+                tests_score = tests_max
+                print(f"  ✅ All tests passed!")
+            else:
+                # Count passed vs failed
+                output = result.stderr + result.stdout
+                passed = output.count(" ok")
+                failed = output.count("FAIL:")
+                errors = output.count("ERROR:")
+                print(f"  ⚠️  {passed} passed, {failed} failed, {errors} errors")
+                tests_score = max(0, min(len(test_files) * 3, tests_max) - (failed + errors) * 2)
+        except subprocess.TimeoutExpired:
+            print(f"  ⚠️  Tests timed out")
+        except Exception as e:
+            print(f"  ⚠️  Could not run tests: {e}")
+    else:
+        print(f"  ❌ tests/ directory missing")
+    print(f"  Score: {tests_score}/{tests_max}")
+    checks.append(("Tests", tests_score, tests_max))
+    score += tests_score
+    max_score += tests_max
+
+    # Summary
+    print(f"\n{'═' * 46}")
+    print(f"  TOTAL SCORE: {score}/{max_score} ({score * 100 // max_score}%)")
+    print(f"{'═' * 46}")
+
+    if score >= 80:
+        print(f"  🟢 READY — Quill is fully operational")
+    elif score >= 50:
+        print(f"  🟡 PARTIAL — Quill needs configuration fixes")
+    else:
+        print(f"  🔴 NOT READY — Critical files missing")
+
+    return score
+
+
+def interactive_session(config: dict):
     """Run Quill in interactive mode."""
-    print(f"Booting Quill with model: {env.get('QUILL_MODEL', 'NOT CONFIGURED')}")
-    print(f"API endpoint: {env.get('QUILL_BASE_URL', 'NOT CONFIGURED')}")
-    print(f"Knowledge files: {len(list((REPO_ROOT / 'KNOWLEDGE').glob('*.md')))} loaded")
-    print()
-    print("Quill is ready. Describe your task or type 'quit' to exit.")
-    print()
+    memory = KeeperMemory(str(REPO_ROOT / ".quill-memory"))
+    routing = route_model(config["model"], config["base_url"])
+
+    print(f"Model: {routing['model']} ({routing['provider']})")
+    print(f"Memory: {memory.stats()}")
+    print(f"\nDescribe your task. Type 'quit' to exit.\n")
 
     while True:
         try:
@@ -197,117 +284,172 @@ def interactive_session(env: dict, config: dict):
         if not task:
             continue
 
-        # Build context and display what would be sent to the model
-        context = build_boot_context(env, task)
-        print(f"\n[Task received — context built: {len(context):,} characters]")
-        print(f"[In production, this context would be sent to {env.get('QUILL_MODEL', 'MODEL')}]")
-        print(f"[System prompt: {len(load_system_prompt()):,} chars | Knowledge: {len(load_knowledge_context()):,} chars]")
-        print()
+        context = build_context(config, task)
+        print(f"\n[Context: {len(context):,} chars | Model: {routing['model']}]")
 
-        # Write task to task log
-        task_log = REPO_ROOT / ".task-log.jsonl"
-        entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "task": task,
-            "model": env.get("QUILL_MODEL", "unknown"),
-            "context_size": len(context)
-        }
+        # Store in memory
+        memory.remember("hot", f"task_{datetime.now(timezone.utc).strftime('%H%M%S')}", {
+            "task": task, "model": routing["model"],
+        })
+
+        # Log task
+        task_log = REPO_ROOT / "DIARY" / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.md"
+        task_log.parent.mkdir(exist_ok=True)
+        entry = f"\n## {datetime.now(timezone.utc).strftime('%H:%M')} UTC\n{task}\n"
         with open(task_log, "a") as f:
-            f.write(json.dumps(entry) + "\n")
+            f.write(entry)
+
+        print(f"[Task logged to DIARY/{task_log.name}]")
 
 
-def do_checkin(env: dict):
-    """Check in with Oracle1 — scan bottles and report status."""
-    print(f"Checking in with Oracle1...")
-    org = env.get("GITHUB_ORG", "SuperInstance")
-    pat = env.get("GITHUB_PAT")
+def do_checkin(config: dict):
+    """Check in with Oracle1."""
+    print("Checking in with Oracle1...\n")
 
-    if not pat:
-        print("ERROR: GITHUB_PAT required for fleet check-in")
+    if not config["github_pat"]:
+        print("⚠️  GITHUB_PAT not set — cannot reach Oracle1's vessel")
+        print("   Add GITHUB_PAT=ghp_xxx to .env")
         return
 
-    # Read bottles from Oracle1
-    import urllib.request
-    req = urllib.request.Request(
-        f"https://api.github.com/repos/{org}/oracle1-vessel/contents/from-fleet",
-        headers={"Authorization": f"token {pat}", "Accept": "application/vnd.github.v3+json"}
-    )
     try:
-        with urllib.request.urlopen(req) as resp:
-            bottles = json.loads(resp.read())
-            print(f"Found {len(bottles)} bottles from Oracle1:")
-            for b in bottles[:10]:
-                print(f"  - {b['name']} ({b.get('size', 0)} bytes)")
-            if len(bottles) > 10:
-                print(f"  ... and {len(bottles) - 10} more")
+        from github import GitHubAPI
+        gh = GitHubAPI(config["github_pat"], config["github_org"])
+        bottles = gh.list_directory("oracle1-vessel", "from-fleet")
+        print(f"Found {len(bottles)} bottles from Oracle1:")
+        for b in bottles[:10]:
+            print(f"  📜 {b['name']} ({b['size']} bytes)")
     except Exception as e:
-        print(f"Could not reach Oracle1's vessel: {e}")
+        print(f"Could not reach Oracle1: {e}")
 
-    print(f"\nQuill status: Operational | Version {VERSION} | Ready for tasks")
+    print(f"\nQuill status: Operational | v{VERSION} | Ready for tasks")
+
+
+def do_keep(config: dict, interval: int = 300):
+    """Run as lighthouse keeper — periodic health monitoring."""
+    import time
+    from health import HealthChecker, CircuitBreaker
+    from llm import chat
+
+    print(f"Lighthouse keeper starting — checking every {interval}s")
+    print(f"Model: {config['model']}")
+    print(f"Press Ctrl+C to stop\n")
+
+    cb = CircuitBreaker(failure_threshold=3, recovery_timeout=60)
+    memory = KeeperMemory(str(REPO_ROOT / ".quill-memory"))
+
+    try:
+        while True:
+            if cb.allow():
+                start = time.time()
+                result = chat(
+                    config["base_url"], config["api_key"], config["model"],
+                    "ping", max_tokens=5, temperature=0, timeout=30,
+                )
+                latency = int((time.time() - start) * 1000)
+
+                if result["status"] == "success":
+                    cb.success()
+                    icon = "✅"
+                else:
+                    cb.failure()
+                    icon = "❌"
+
+                ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+                cb_state = cb.status()
+                mem = memory.stats()
+                print(f"[{ts}] {icon} {result['status']} ({latency}ms) "
+                      f"| CB:{cb_state['state']} | Mem:{mem['hot']['count']}h/{mem['warm']['count']}w/{mem['cold']['count']}c "
+                      f"| Requests:{memory.stats()['hot']['count']}")
+
+                # Store heartbeat
+                memory.remember("hot", f"heartbeat_{ts.replace(':','')}", {
+                    "status": result["status"], "latency_ms": latency,
+                    "model": config["model"],
+                })
+            else:
+                ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+                print(f"[{ts}] 🔴 Circuit OPEN — skipping")
+
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        print(f"\nLighthouse keeper stopped.")
 
 
 def main():
-    parser = argparse.ArgumentParser(description=f"Quill — {AGENT_DESIGNATION}")
-    parser.add_argument("--version", action="store_true", help="Show version and exit")
+    parser = argparse.ArgumentParser(
+        description=f"Quill — {DESIGNATION}",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python3 boot.py --assess           Score bootcamp readiness
+  python3 boot.py --task "Audit X"   Work on a directed task
+  python3 boot.py --checkin          Check in with Oracle1
+  python3 boot.py --keep             Run health monitoring
+  python3 boot.py --export ctx.txt   Export boot context to file
+  python3 boot.py --version          Show version
+        """,
+    )
+    parser.add_argument("--version", action="store_true", help="Show version")
+    parser.add_argument("--assess", action="store_true", help="Assess bootcamp readiness")
     parser.add_argument("--task", "-t", type=str, help="Directed task from Oracle1")
     parser.add_argument("--checkin", action="store_true", help="Check in with Oracle1")
-    parser.add_argument("--env-check", action="store_true", help="Validate environment only")
-    parser.add_argument("--export-context", type=str, metavar="FILE",
-                        help="Export boot context to file instead of running")
-    parser.add_argument("--model", type=str, help="Override model from env")
-    parser.add_argument("--api-key", type=str, help="Override API key from env")
-    parser.add_argument("--base-url", type=str, help="Override base URL from env")
+    parser.add_argument("--keep", action="store_true", help="Run as lighthouse keeper")
+    parser.add_argument("--interval", type=int, default=300, help="Health check interval (seconds)")
+    parser.add_argument("--export", type=str, metavar="FILE", help="Export boot context to file")
+    parser.add_argument("--model", type=str, help="Override model")
+    parser.add_argument("--api-key", type=str, help="Override API key")
+    parser.add_argument("--base-url", type=str, help="Override base URL")
     args = parser.parse_args()
 
     print_banner()
 
-    # Load configuration
-    env = load_env()
-    config = load_config()
+    config = load()
 
     # CLI overrides
     if args.model:
-        env["QUILL_MODEL"] = args.model
+        config["model"] = args.model
     if args.api_key:
-        env["QUILL_API_KEY"] = args.api_key
+        config["api_key"] = args.api_key
     if args.base_url:
-        env["QUILL_BASE_URL"] = args.base_url
+        config["base_url"] = args.base_url
 
     if args.version:
-        print(f"Quill v{VERSION} — {AGENT_DESIGNATION}")
+        print(f"Quill v{VERSION} — {DESIGNATION}")
         return
 
-    # Environment validation
-    issues = validate_environment(env)
-    if args.env_check or issues:
-        if issues:
-            print("Environment issues found:")
-            for i in issues:
-                print(f"  ⚠️  {i}")
-            print()
-            print(f"Copy .env.example to .env and fill in your values:")
-            print(f"  cp .env.example .env")
-            if not args.env_check:
-                print("\nContinuing in degraded mode (no API, no GitHub)...")
-        elif args.env_check:
-            print("All environment variables are configured. Quill is ready to boot.")
-            return
-
-    # Export context mode
-    if args.export_context:
-        task = args.task or None
-        context = build_boot_context(env, task)
-        Path(args.export_context).write_text(context)
-        print(f"Boot context exported to {args.export_context} ({len(context):,} characters)")
+    if args.assess:
+        score = assess(config)
         return
 
-    # Checkin mode
+    if args.export:
+        context = build_context(config)
+        Path(args.export).write_text(context, encoding="utf-8")
+        print(f"Boot context exported to {args.export} ({len(context):,} chars)")
+        return
+
     if args.checkin:
-        do_checkin(env)
+        do_checkin(config)
         return
 
-    # Interactive session
-    interactive_session(env, config)
+    if args.keep:
+        if not is_ready(config):
+            print("⚠️  Not fully configured. Set QUILL_API_KEY, QUILL_BASE_URL, QUILL_MODEL")
+        do_keep(config, args.interval)
+        return
+
+    if args.task:
+        if not is_ready(config):
+            print("⚠️  Not fully configured. Running in offline mode.")
+        context = build_context(config, args.task)
+        print(f"Task: {args.task}")
+        print(f"Context: {len(context):,} characters")
+        print(f"Model: {config['model']} ({detect_provider(config['base_url'])})")
+        print(f"\nIn production, this context would be sent to the model.")
+        print(f"Use --export to save the context, or run interactive mode.\n")
+        return
+
+    # Default: interactive
+    interactive_session(config)
 
 
 if __name__ == "__main__":

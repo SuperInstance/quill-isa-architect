@@ -1,8 +1,9 @@
 .env
-.env.example
+.quill-memory/
+KNOWLEDGE/private/
 __pycache__/
 *.pyc
+*.pyo
 .task-log.jsonl
 .DS_Store
 *.swp
-.quill-cache/

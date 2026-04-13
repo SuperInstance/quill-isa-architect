@@ -1,0 +1,39 @@
+{
+  "name": "quill-isa-architect",
+  "version": "2.0.0",
+  "description": "Quill — ISA Spec Architect & Code Archaeologist. Bootable fleet agent twin.",
+  "role": "architect",
+  "fleet": "SuperInstance",
+  "reporting_to": "Oracle1",
+  "author": "Quill (Architect)",
+  "created": "2026-04-13",
+  "license": "MIT",
+  "deployment": {
+    "type": "local",
+    "platform": "any",
+    "entrypoint": "boot.py",
+    "runtime": "python3.10+",
+    "zero_dependencies": true
+  },
+  "secrets": {
+    "env_file": ".env",
+    "required": ["QUILL_API_KEY", "QUILL_BASE_URL", "QUILL_MODEL"],
+    "optional": ["GITHUB_PAT", "GITHUB_ORG", "LIGHTHOUSE_WEBHOOK"]
+  },
+  "endpoints": {
+    "health": "python3 lighthouse.py --health",
+    "chat": "python3 lighthouse.py --chat '{message}'",
+    "bootcamp_assess": "python3 boot.py --assess",
+    "scan": "python3 -m tools.cross_repo_scanner"
+  },
+  "memory": {
+    "hot_ttl_seconds": 7200,
+    "warm_ttl_seconds": 604800,
+    "cold_permanent": true,
+    "storage": ".quill-memory/"
+  },
+  "i2i": {
+    "version": "lite",
+    "types": ["PROPOSAL", "REVIEW", "ACCEPT", "REJECT", "COMMENT"]
+  }
+}
